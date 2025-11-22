@@ -3,16 +3,11 @@ const WebSocket = require('ws');
 const http = require('http');
 
 const app = express();
-// Render 會自動提供 PORT 環境變數，如果沒有就用 3000
 const port = process.env.PORT || 3000;
 
-// 建立 HTTP 伺服器
 const server = http.createServer(app);
-
-// 建立 WebSocket 伺服器
 const wss = new WebSocket.Server({ server });
 
-// 當你用瀏覽器打開網址時，顯示這個網頁
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -22,64 +17,117 @@ app.get('/', (req, res) => {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>ESP32-CAM 盲人拐杖監控</title>
             <style>
-                body { background-color: #121212; color: #ffffff; font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+                body { background-color: #121212; color: #ffffff; font-family: 'Arial', sans-serif; text-align: center; margin: 0; padding: 20px; }
                 h2 { margin-bottom: 10px; }
-                #cam-container { position: relative; display: inline-block; margin-top: 20px; border: 3px solid #444; border-radius: 10px; overflow: hidden; }
+                
+                /* 影像區塊 */
+                #cam-container { 
+                    position: relative; display: inline-block; margin-top: 10px; 
+                    border: 3px solid #444; border-radius: 10px; overflow: hidden; 
+                }
                 img { width: 100%; max-width: 640px; height: auto; display: block; }
-                .status { margin-top: 15px; font-size: 1.2em; padding: 10px; background: #333; border-radius: 5px; display: inline-block; }
-                .highlight { color: #00ff00; font-weight: bold; }
+
+                /* 數據儀表板區塊 */
+                .dashboard { 
+                    display: flex; justify-content: center; gap: 15px; margin-top: 20px; flex-wrap: wrap;
+                }
+                .card {
+                    background: #333; padding: 15px; border-radius: 10px; min-width: 100px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                }
+                .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #aaa; }
+                .card span { font-size: 24px; font-weight: bold; }
+                
+                .highlight { color: #00ff00; } /* 正常顏色 */
+                .warning { color: #ffcc00; }   /* 警告顏色 */
+                .danger { color: #ff0000; }    /* 危險顏色 */
+
             </style>
         </head>
         <body>
-            <h2>拐杖視角即時監控</h2>
+            <h2>拐杖即時監控與導航</h2>
+            
             <div id="cam-container">
-                <img id="stream" src="" alt="等待連線中..." />
+                <img id="stream" src="" alt="等待影像連線..." />
             </div>
-            <br>
-            <div class="status">
-                🔋 電量: <span id="bat" class="highlight">等待數據...</span>
+
+            <div class="dashboard">
+                <div class="card">
+                    <h3>🔋 電池電量</h3>
+                    <span id="bat-val" class="highlight">--</span> %
+                </div>
+
+                <div class="card">
+                    <h3>⬆️ 前方距離</h3>
+                    <span id="d1-val">--</span> cm
+                </div>
+
+                <div class="card">
+                    <h3>⬇️ 下方距離</h3>
+                    <span id="d2-val">--</span> cm
+                </div>
             </div>
 
             <script>
-                // 自動判斷是 ws:// 還是 wss:// (加密)
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = protocol + '//' + window.location.host;
                 let ws;
 
+                function updateColor(elementId, value, safeDist, dangerDist) {
+                    const el = document.getElementById(elementId);
+                    el.innerText = value;
+                    
+                    if (value < 0) { // 偵測錯誤
+                        el.className = ''; 
+                        el.innerText = "超出範圍";
+                    } else if (value <= dangerDist) {
+                        el.className = 'danger';
+                    } else if (value <= safeDist) {
+                        el.className = 'warning';
+                    } else {
+                        el.className = 'highlight';
+                    }
+                }
+
                 function connect() {
                     ws = new WebSocket(wsUrl);
-                    ws.binaryType = 'arraybuffer'; // 接收二進位圖片數據
+                    ws.binaryType = 'arraybuffer'; 
 
-                    ws.onopen = () => { console.log('已連線至伺服器'); };
+                    ws.onopen = () => { console.log('已連線'); };
                     
                     ws.onmessage = (event) => {
-                        // 如果收到的是文字 (電量 JSON)
                         if (typeof event.data === 'string') {
                             try {
                                 const data = JSON.parse(event.data);
+                                
+                                // 更新電量
                                 if(data.bat !== undefined) {
-                                    document.getElementById('bat').innerText = data.bat + "%";
-                                    // 低電量警示
-                                    document.getElementById('bat').style.color = data.bat < 20 ? '#ff0000' : '#00ff00';
+                                    const batEl = document.getElementById('bat-val');
+                                    batEl.innerText = data.bat;
+                                    batEl.className = data.bat < 20 ? 'danger' : 'highlight';
                                 }
+
+                                // 更新前方距離 (假設小於 50cm 為危險)
+                                if(data.d1 !== undefined) {
+                                    updateColor('d1-val', data.d1, 100, 50);
+                                }
+
+                                // 更新下方距離 (假設小於 30cm 為危險)
+                                if(data.d2 !== undefined) {
+                                    updateColor('d2-val', data.d2, 60, 30);
+                                }
+
                             } catch (e) { console.error(e); }
-                        } 
-                        // 如果收到的是二進位資料 (圖片)
-                        else {
+                        } else {
                             const blob = new Blob([event.data], {type: 'image/jpeg'});
                             const url = URL.createObjectURL(blob);
                             const img = document.getElementById('stream');
-                            
-                            // 釋放舊的記憶體，避免瀏覽器卡頓
                             if (img.src) URL.revokeObjectURL(img.src);
                             img.src = url;
                         }
                     };
 
-                    ws.onclose = () => {
-                        console.log('連線中斷，3秒後重連...');
-                        setTimeout(connect, 3000);
-                    };
+                    ws.onclose = () => { setTimeout(connect, 3000); };
                 }
 
                 connect();
@@ -89,20 +137,14 @@ app.get('/', (req, res) => {
     `);
 });
 
-// WebSocket 連線處理
 wss.on('connection', (ws) => {
-    console.log('Client connected');
-
     ws.on('message', (message, isBinary) => {
-        // 廣播機制：收到任何訊息（無論是圖片還是電量），都轉發給其他所有人
         wss.clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
                 client.send(message, { binary: isBinary });
             }
         });
     });
-
-    ws.on('close', () => console.log('Client disconnected'));
 });
 
 server.listen(port, () => {
