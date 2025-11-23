@@ -15,56 +15,62 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>ESP32-CAM 盲人拐杖監控</title>
+            <title>拐杖導航系統</title>
             <style>
-                body { background-color: #121212; color: #ffffff; font-family: 'Arial', sans-serif; text-align: center; margin: 0; padding: 20px; }
-                h2 { margin-bottom: 10px; }
+                body { background-color: #121212; color: #ffffff; font-family: 'Arial', sans-serif; text-align: center; margin: 0; padding: 10px; }
                 
                 /* 影像區塊 */
                 #cam-container { 
                     position: relative; display: inline-block; margin-top: 10px; 
-                    border: 3px solid #444; border-radius: 10px; overflow: hidden; 
+                    border: 2px solid #555; border-radius: 8px; overflow: hidden; 
                 }
-                img { width: 100%; max-width: 640px; height: auto; display: block; }
+                img { width: 100%; max-width: 600px; height: auto; display: block; }
 
-                /* 數據儀表板區塊 */
+                /* 狀態大字報 */
+                #status-box {
+                    font-size: 24px; font-weight: bold; margin: 15px 0; padding: 10px;
+                    border-radius: 5px; background: #222; color: #aaa;
+                }
+
+                /* 數據儀表板 */
                 .dashboard { 
-                    display: flex; justify-content: center; gap: 15px; margin-top: 20px; flex-wrap: wrap;
+                    display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
                 }
                 .card {
-                    background: #333; padding: 15px; border-radius: 10px; min-width: 100px;
+                    background: #333; padding: 10px; border-radius: 8px; min-width: 90px; flex: 1;
                     box-shadow: 0 4px 6px rgba(0,0,0,0.3);
                 }
-                .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #aaa; }
-                .card span { font-size: 24px; font-weight: bold; }
+                .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #ccc; }
+                .card span { font-size: 22px; font-weight: bold; }
                 
-                .highlight { color: #00ff00; } /* 正常顏色 */
-                .warning { color: #ffcc00; }   /* 警告顏色 */
-                .danger { color: #ff0000; }    /* 危險顏色 */
+                .safe { color: #00ff00; }     /* 綠 */
+                .warning { color: #ffcc00; }  /* 黃 */
+                .danger { color: #ff0000; }   /* 紅 */
+                .bg-danger { background-color: #550000; color: #ffaaaa; } /* 危險背景 */
 
             </style>
         </head>
         <body>
-            <h2>拐杖即時監控與導航</h2>
-            
+            <div id="status-box">安全通行</div>
+
             <div id="cam-container">
-                <img id="stream" src="" alt="等待影像連線..." />
+                <img id="stream" src="" alt="連線中..." />
             </div>
 
             <div class="dashboard">
                 <div class="card">
-                    <h3>🔋 電池電量</h3>
-                    <span id="bat-val" class="highlight">--</span> %
+                    <h3>↖️ 左前距離</h3>
+                    <span id="L-val">--</span> cm
                 </div>
 
                 <div class="card">
-                    <h3>⬆️ 前方距離</h3>
-                    <span id="d1-val">--</span> cm
+                    <h3>🔋 電量</h3>
+                    <span id="bat-val" class="safe">--</span> %
                 </div>
 
                 <div class="card">
-                    <h3>⬇️ 下方距離</h3>
-                    <span id="d2-val">--</span> cm
+                    <h3>↗️ 右前距離</h3>
+                    <span id="R-val">--</span> cm
                 </div>
             </div>
 
@@ -73,19 +79,41 @@ app.get('/', (req, res) => {
                 const wsUrl = protocol + '//' + window.location.host;
                 let ws;
 
-                function updateColor(elementId, value, safeDist, dangerDist) {
+                function updateColor(elementId, value) {
                     const el = document.getElementById(elementId);
                     el.innerText = value;
-                    
-                    if (value < 0) { // 偵測錯誤
-                        el.className = ''; 
-                        el.innerText = "超出範圍";
-                    } else if (value <= dangerDist) {
+                    if (value < 0) {
+                         el.innerText = "Err"; el.className = '';
+                    } else if (value <= 50) {
                         el.className = 'danger';
-                    } else if (value <= safeDist) {
+                    } else if (value <= 100) {
                         el.className = 'warning';
                     } else {
-                        el.className = 'highlight';
+                        el.className = 'safe';
+                    }
+                }
+
+                function updateStatus(distL, distR) {
+                    const box = document.getElementById('status-box');
+                    // 過濾無效數值 (-1)
+                    let L = (distL < 0) ? 999 : distL;
+                    let R = (distR < 0) ? 999 : distR;
+
+                    if (L < 50 && R < 50) {
+                        box.innerText = "🛑 前方障礙！請停止";
+                        box.className = "bg-danger";
+                    } else if (L < 60) {
+                        box.innerText = "⚠️ 左側靠太近 (向右走)";
+                        box.className = "";
+                        box.style.color = "#ffcc00";
+                    } else if (R < 60) {
+                        box.innerText = "⚠️ 右側靠太近 (向左走)";
+                        box.className = "";
+                        box.style.color = "#ffcc00";
+                    } else {
+                        box.innerText = "✅ 安全通行";
+                        box.className = "";
+                        box.style.color = "#00ff00";
                     }
                 }
 
@@ -93,31 +121,23 @@ app.get('/', (req, res) => {
                     ws = new WebSocket(wsUrl);
                     ws.binaryType = 'arraybuffer'; 
 
-                    ws.onopen = () => { console.log('已連線'); };
-                    
                     ws.onmessage = (event) => {
                         if (typeof event.data === 'string') {
                             try {
                                 const data = JSON.parse(event.data);
                                 
-                                // 更新電量
+                                // 電量
                                 if(data.bat !== undefined) {
-                                    const batEl = document.getElementById('bat-val');
-                                    batEl.innerText = data.bat;
-                                    batEl.className = data.bat < 20 ? 'danger' : 'highlight';
+                                    document.getElementById('bat-val').innerText = data.bat;
+                                }
+                                // 左右距離
+                                if(data.L !== undefined && data.R !== undefined) {
+                                    updateColor('L-val', data.L);
+                                    updateColor('R-val', data.R);
+                                    updateStatus(data.L, data.R);
                                 }
 
-                                // 更新前方距離 (假設小於 50cm 為危險)
-                                if(data.d1 !== undefined) {
-                                    updateColor('d1-val', data.d1, 100, 50);
-                                }
-
-                                // 更新下方距離 (假設小於 30cm 為危險)
-                                if(data.d2 !== undefined) {
-                                    updateColor('d2-val', data.d2, 60, 30);
-                                }
-
-                            } catch (e) { console.error(e); }
+                            } catch (e) { }
                         } else {
                             const blob = new Blob([event.data], {type: 'image/jpeg'});
                             const url = URL.createObjectURL(blob);
@@ -126,10 +146,8 @@ app.get('/', (req, res) => {
                             img.src = url;
                         }
                     };
-
-                    ws.onclose = () => { setTimeout(connect, 3000); };
+                    ws.onclose = () => { setTimeout(connect, 2000); };
                 }
-
                 connect();
             </script>
         </body>
