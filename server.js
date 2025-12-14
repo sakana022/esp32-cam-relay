@@ -3,7 +3,6 @@ const WebSocket = require('ws');
 
 // ==============================================
 // 1. 定義網頁內容 (HTML/CSS/JS)
-//    這裡把網頁包裝成一個長字串，讓 Node.js 送給瀏覽器
 // ==============================================
 const htmlContent = `
 <!DOCTYPE html>
@@ -21,8 +20,6 @@ const htmlContent = `
             padding: 20px;
             text-align: center;
         }
-
-        /* 狀態列 */
         .status-bar {
             background-color: #1f1f1f;
             padding: 15px;
@@ -34,9 +31,7 @@ const htmlContent = `
         }
         .status-safe { color: #2ecc71; border-color: #2ecc71; }
         .status-danger { color: #e74c3c; border-color: #e74c3c; }
-        .status-muted { color: #95a5a6; border-color: #95a5a6; }
 
-        /* 影像區塊 */
         #stream-container {
             margin-bottom: 20px;
             border: 2px solid #333;
@@ -51,7 +46,6 @@ const htmlContent = `
             display: block;
         }
 
-        /* 儀表板 */
         .dashboard {
             display: flex;
             justify-content: space-between;
@@ -70,19 +64,13 @@ const htmlContent = `
             margin-bottom: 5px;
         }
         .card-value {
-            font-size: 1.2rem; /* 字體稍微調小以防手機換行 */
+            font-size: 1.5rem;
             font-weight: bold;
         }
         
-        /* 數值顏色 */
         .val-blue { color: #3498db; }
         .val-yellow { color: #f1c40f; }
-
-        /* 模式顏色 */
-        .mode-normal { color: #2ecc71; } /* 綠 */
-        .mode-crowd { color: #e67e22; }  /* 橘 */
-        .mode-muted { color: #e74c3c; text-decoration: line-through; } /* 紅+刪除線 */
-
+        .val-green { color: #2ecc71; } 
     </style>
 </head>
 <body>
@@ -102,8 +90,8 @@ const htmlContent = `
         </div>
 
         <div class="card">
-            <div class="card-title">⚙️ 目前模式</div>
-            <div id="sysMode" class="card-value mode-normal">連線中</div>
+            <div class="card-title">🔋 電量</div>
+            <div id="batLevel" class="card-value val-green">-- %</div>
         </div>
 
         <div class="card">
@@ -113,7 +101,6 @@ const htmlContent = `
     </div>
 
     <script>
-        // 自動判斷 WebSocket 網址
         var wsProtocol = (window.location.protocol === 'https:') ? 'wss://' : 'ws://';
         var wsUrl = wsProtocol + window.location.host; 
         var ws = new WebSocket(wsUrl);
@@ -121,61 +108,41 @@ const htmlContent = `
         var img = document.getElementById('camera-stream');
         var elDistL = document.getElementById('distL');
         var elDistR = document.getElementById('distR');
-        var elMode = document.getElementById('sysMode');
+        var elBat = document.getElementById('batLevel'); 
         var elStatus = document.getElementById('status-bar');
 
         ws.onopen = function() {
-            console.log("Connected to WebSocket");
             elStatus.innerText = "✅ 伺服器已連線";
         };
 
         ws.onmessage = function(event) {
-            // 1. 如果收到的是影像資料 (Blob)
             if (event.data instanceof Blob) {
                 var url = URL.createObjectURL(event.data);
                 img.src = url;
                 img.onload = function() { URL.revokeObjectURL(url); }
             } 
-            // 2. 如果收到的是文字數據 (JSON)
             else {
                 try {
                     var data = JSON.parse(event.data);
 
-                    // 更新距離顯示
                     elDistL.innerText = (data.L === 999) ? "> 3m" : data.L + " cm";
                     elDistR.innerText = (data.R === 999) ? "> 3m" : data.R + " cm";
-
-                    // 更新模式顯示與翻譯
-                    var modeText = "未知";
-                    var modeClass = "mode-normal";
                     
-                    if (data.Mode === "NORMAL") { 
-                        modeText = "🟢 一般模式"; 
-                        modeClass = "mode-normal"; 
-                    } else if (data.Mode === "CROWD") { 
-                        modeText = "🟠 人潮擁擠"; 
-                        modeClass = "mode-crowd"; 
-                    } else if (data.Mode === "MUTED") { 
-                        modeText = "🔴 靜音中"; 
-                        modeClass = "mode-muted"; 
-                    }
-                    
-                    elMode.innerText = modeText;
-                    elMode.className = "card-value " + modeClass;
-
-                    // 更新頂部狀態列警示
-                    if (data.Mode === "MUTED") {
-                        elStatus.innerText = "🔇 系統靜音中";
-                        elStatus.className = "status-bar status-muted";
+                    // 電量顯示邏輯 (目前 ESP32 沒有傳 Bat，所以顯示 -- %)
+                    if (data.Bat !== undefined) {
+                        elBat.innerText = data.Bat + " %";
                     } else {
-                        var minDist = Math.min(data.L, data.R);
-                        if (minDist < 50) {
-                            elStatus.innerText = "⚠️ 注意前方障礙物！";
-                            elStatus.className = "status-bar status-danger";
-                        } else {
-                            elStatus.innerText = "✅ 安全通行";
-                            elStatus.className = "status-bar status-safe";
-                        }
+                        elBat.innerText = "-- %";
+                    }
+
+                    // 障礙物警示
+                    var minDist = Math.min(data.L, data.R);
+                    if (minDist < 50) {
+                        elStatus.innerText = "⚠️ 注意前方障礙物！";
+                        elStatus.className = "status-bar status-danger";
+                    } else {
+                        elStatus.innerText = "✅ 安全通行";
+                        elStatus.className = "status-bar status-safe";
                     }
 
                 } catch (e) {
@@ -194,39 +161,26 @@ const htmlContent = `
 `;
 
 // ==============================================
-// 2. 建立 HTTP 伺服器
+// 2. 啟動伺服器
 // ==============================================
 const server = http.createServer((req, res) => {
-    // 當使用者開啟網頁時，回傳上面的 HTML 內容
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(htmlContent);
 });
 
-// ==============================================
-// 3. 建立 WebSocket 伺服器 (綁定到 HTTP Server)
-// ==============================================
 const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
-    console.log('Client connected');
-    
-    // 當收到 ESP32 傳來的資料
     ws.on('message', (message) => {
-        // 廣播給所有連線的人 (也就是您的手機網頁)
         wss.clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
                 client.send(message);
             }
         });
     });
-
-    ws.on('close', () => console.log('Client disconnected'));
 });
 
-// ==============================================
-// 4. 啟動伺服器
-// ==============================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT}`);
+    console.log(\`Server started on port \${PORT}\`);
 });
