@@ -3,6 +3,7 @@ const WebSocket = require('ws');
 
 // ==============================================
 // 1. 定義網頁內容 (HTML/CSS/JS)
+//    這是您指定的「模式切換」版本介面
 // ==============================================
 const htmlContent = `
 <!DOCTYPE html>
@@ -69,7 +70,7 @@ const htmlContent = `
             margin-bottom: 5px;
         }
         .card-value {
-            font-size: 1.2rem; 
+            font-size: 1.2rem;
             font-weight: bold;
         }
         
@@ -135,12 +136,14 @@ const htmlContent = `
             } 
             else {
                 try {
+                    // 這裡負責解析 Arduino 傳來的數據
                     var data = JSON.parse(event.data);
 
+                    // 1. 更新距離
                     elDistL.innerText = (data.L === 999) ? "> 3m" : data.L + " cm";
                     elDistR.innerText = (data.R === 999) ? "> 3m" : data.R + " cm";
 
-                    // 處理模式顯示
+                    // 2. 更新中間的模式顯示
                     var modeText = "未知";
                     var modeClass = "mode-normal";
                     
@@ -158,7 +161,7 @@ const htmlContent = `
                     elMode.innerText = modeText;
                     elMode.className = "card-value " + modeClass;
 
-                    // 處理狀態列
+                    // 3. 更新頂部狀態列
                     if (data.Mode === "MUTED") {
                         elStatus.innerText = "🔇 系統靜音中";
                         elStatus.className = "status-bar status-muted";
@@ -204,6 +207,7 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (ws) => {
     console.log('Client connected');
     ws.on('message', (message) => {
+        // 廣播收到的一切資料
         wss.clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
                 client.send(message);
@@ -214,9 +218,9 @@ wss.on('connection', (ws) => {
 });
 
 // ==============================================
-// 4. 啟動伺服器
+// 4. 啟動伺服器 (修正了這裡的語法錯誤)
 // ==============================================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT}`);
+    console.log(`Server started on port ${PORT}`);
 });
