@@ -1,170 +1,205 @@
-const express = require('express');
-const WebSocket = require('ws');
-const http = require('http');
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Cane Monitor</title>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
+            background-color: #121212;
+            color: white;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
 
-const app = express();
-const port = process.env.PORT || 3000;
+        /* 頂部狀態列 */
+        .status-bar {
+            background-color: #1f1f1f;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border: 1px solid #333;
+        }
+        .status-safe { color: #2ecc71; }
+        .status-danger { color: #e74c3c; }
 
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+        /* 影像區塊 */
+        #stream-container {
+            margin-bottom: 20px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: inline-block;
+            overflow: hidden;
+            background: #000;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
 
-app.get('/', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>拐杖導航系統</title>
-            <style>
-                body { background-color: #121212; color: #ffffff; font-family: 'Arial', sans-serif; text-align: center; margin: 0; padding: 10px; }
-                
-                /* 影像區塊 */
-                #cam-container { 
-                    position: relative; display: inline-block; margin-top: 10px; 
-                    border: 2px solid #555; border-radius: 8px; overflow: hidden; 
+        /* 儀表板卡片區 */
+        .dashboard {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .card {
+            background-color: #1f1f1f;
+            flex: 1;
+            padding: 15px 5px;
+            border-radius: 10px;
+            border: 1px solid #333;
+        }
+
+        .card-title {
+            font-size: 0.9rem;
+            color: #aaa;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+
+        .card-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        /* 個別顏色設定 */
+        .val-blue { color: #3498db; }
+        .val-yellow { color: #f1c40f; }
+        
+        /* 模式文字顏色 */
+        .mode-normal { color: #2ecc71; } /* 綠 */
+        .mode-crowd { color: #e67e22; }  /* 橘 */
+        .mode-muted { color: #e74c3c; }  /* 紅 */
+
+        /* 簡單的圖示代替 SVG */
+        .icon { font-style: normal; }
+
+    </style>
+</head>
+<body>
+
+    <div id="status-bar" class="status-bar status-safe">
+        ✅ 等待連線...
+    </div>
+
+    <div id="stream-container">
+        <img id="camera-stream" src="" alt="Camera Stream" style="min-height: 240px; min-width: 320px;">
+    </div>
+
+    <div class="dashboard">
+        <div class="card">
+            <div class="card-title"><span class="icon">↖️</span> 左前距離</div>
+            <div id="distL" class="card-value val-blue">--- cm</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><span class="icon">⚙️</span> 目前模式</div>
+            <div id="sysMode" class="card-value mode-normal">連線中</div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><span class="icon">↗️</span> 右前距離</div>
+            <div id="distR" class="card-value val-yellow">--- cm</div>
+        </div>
+    </div>
+
+    <script>
+        // 設定您的 WebSocket 網址 (請確認與 ESP32 設定一致)
+        // 如果是在 render 上跑，通常是 wss://your-app.onrender.com
+        // 這裡自動抓取當前網址
+        var wsProtocol = (window.location.protocol === 'https:') ? 'wss://' : 'ws://';
+        var wsUrl = wsProtocol + window.location.host; 
+        
+        // 如果您是直接開 HTML 檔案測試，請手動填入網址，例如：
+        // var wsUrl = "wss://my-cane-cam.onrender.com"; 
+
+        var ws = new WebSocket(wsUrl);
+        var img = document.getElementById('camera-stream');
+        
+        // UI 元素
+        var elDistL = document.getElementById('distL');
+        var elDistR = document.getElementById('distR');
+        var elMode = document.getElementById('sysMode');
+        var elStatus = document.getElementById('status-bar');
+
+        ws.onopen = function() {
+            console.log("Connected to WebSocket");
+            elStatus.innerText = "✅ 已連線 - 系統正常";
+        };
+
+        ws.onmessage = function(event) {
+            // 判斷接收到的是影像(Blob) 還是 數據(Text)
+            if (event.data instanceof Blob) {
+                var url = URL.createObjectURL(event.data);
+                img.src = url;
+                img.onload = function() {
+                    URL.revokeObjectURL(url);
                 }
-                img { width: 100%; max-width: 600px; height: auto; display: block; }
+            } else {
+                try {
+                    // 解析 JSON 數據: {"L": 120, "R": 130, "Mode": "NORMAL"}
+                    var data = JSON.parse(event.data);
 
-                /* 狀態大字報 */
-                #status-box {
-                    font-size: 24px; font-weight: bold; margin: 15px 0; padding: 10px;
-                    border-radius: 5px; background: #222; color: #aaa;
-                }
+                    // 1. 更新距離
+                    elDistL.innerText = (data.L === 999) ? "> 300 cm" : data.L + " cm";
+                    elDistR.innerText = (data.R === 999) ? "> 300 cm" : data.R + " cm";
 
-                /* 數據儀表板 */
-                .dashboard { 
-                    display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
-                }
-                .card {
-                    background: #333; padding: 10px; border-radius: 8px; min-width: 90px; flex: 1;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-                }
-                .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #ccc; }
-                .card span { font-size: 22px; font-weight: bold; }
-                
-                .safe { color: #00ff00; }     /* 綠 */
-                .warning { color: #ffcc00; }  /* 黃 */
-                .danger { color: #ff0000; }   /* 紅 */
-                .bg-danger { background-color: #550000; color: #ffaaaa; } /* 危險背景 */
+                    // 2. 更新模式 (翻譯成中文)
+                    var modeText = "未知";
+                    var modeClass = "mode-normal";
 
-            </style>
-        </head>
-        <body>
-            <div id="status-box">安全通行</div>
-
-            <div id="cam-container">
-                <img id="stream" src="" alt="連線中..." />
-            </div>
-
-            <div class="dashboard">
-                <div class="card">
-                    <h3>↖️ 左前距離</h3>
-                    <span id="L-val">--</span> cm
-                </div>
-
-                <div class="card">
-                    <h3>🔋 電量</h3>
-                    <span id="bat-val" class="safe">--</span> %
-                </div>
-
-                <div class="card">
-                    <h3>↗️ 右前距離</h3>
-                    <span id="R-val">--</span> cm
-                </div>
-            </div>
-
-            <script>
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = protocol + '//' + window.location.host;
-                let ws;
-
-                function updateColor(elementId, value) {
-                    const el = document.getElementById(elementId);
-                    el.innerText = value;
-                    if (value < 0) {
-                         el.innerText = "Err"; el.className = '';
-                    } else if (value <= 50) {
-                        el.className = 'danger';
-                    } else if (value <= 100) {
-                        el.className = 'warning';
-                    } else {
-                        el.className = 'safe';
+                    if (data.Mode === "NORMAL") {
+                        modeText = "🟢 一般模式";
+                        modeClass = "mode-normal";
+                    } else if (data.Mode === "CROWD") {
+                        modeText = "🟠 人潮擁擠";
+                        modeClass = "mode-crowd";
+                    } else if (data.Mode === "MUTED") {
+                        modeText = "🔴 靜音中";
+                        modeClass = "mode-muted";
                     }
-                }
+                    
+                    elMode.innerText = modeText;
+                    elMode.className = "card-value " + modeClass;
 
-                function updateStatus(distL, distR) {
-                    const box = document.getElementById('status-box');
-                    // 過濾無效數值 (-1)
-                    let L = (distL < 0) ? 999 : distL;
-                    let R = (distR < 0) ? 999 : distR;
-
-                    if (L < 50 && R < 50) {
-                        box.innerText = "🛑 前方障礙！請停止";
-                        box.className = "bg-danger";
-                    } else if (L < 60) {
-                        box.innerText = "⚠️ 左側靠太近 (向右走)";
-                        box.className = "";
-                        box.style.color = "#ffcc00";
-                    } else if (R < 60) {
-                        box.innerText = "⚠️ 右側靠太近 (向左走)";
-                        box.className = "";
-                        box.style.color = "#ffcc00";
+                    // 3. 更新頂部警示狀態 (簡單邏輯：靜音不警告，否則看距離)
+                    if (data.Mode === "MUTED") {
+                        elStatus.innerText = "🔇 系統靜音中";
+                        elStatus.className = "status-bar";
+                        elStatus.style.color = "#aaa";
                     } else {
-                        box.innerText = "✅ 安全通行";
-                        box.className = "";
-                        box.style.color = "#00ff00";
-                    }
-                }
-
-                function connect() {
-                    ws = new WebSocket(wsUrl);
-                    ws.binaryType = 'arraybuffer'; 
-
-                    ws.onmessage = (event) => {
-                        if (typeof event.data === 'string') {
-                            try {
-                                const data = JSON.parse(event.data);
-                                
-                                // 電量
-                                if(data.bat !== undefined) {
-                                    document.getElementById('bat-val').innerText = data.bat;
-                                }
-                                // 左右距離
-                                if(data.L !== undefined && data.R !== undefined) {
-                                    updateColor('L-val', data.L);
-                                    updateColor('R-val', data.R);
-                                    updateStatus(data.L, data.R);
-                                }
-
-                            } catch (e) { }
+                        // 如果距離小於 50cm 視為危險
+                        var minDist = Math.min(data.L, data.R);
+                        if (minDist < 50) {
+                            elStatus.innerText = "⚠️ 注意前方障礙物！";
+                            elStatus.className = "status-bar status-danger";
                         } else {
-                            const blob = new Blob([event.data], {type: 'image/jpeg'});
-                            const url = URL.createObjectURL(blob);
-                            const img = document.getElementById('stream');
-                            if (img.src) URL.revokeObjectURL(img.src);
-                            img.src = url;
+                            elStatus.innerText = "✅ 安全通行";
+                            elStatus.className = "status-bar status-safe";
                         }
-                    };
-                    ws.onclose = () => { setTimeout(connect, 2000); };
+                    }
+
+                } catch (e) {
+                    console.log("JSON Parse Error", e);
                 }
-                connect();
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-wss.on('connection', (ws) => {
-    ws.on('message', (message, isBinary) => {
-        wss.clients.forEach((client) => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message, { binary: isBinary });
             }
-        });
-    });
-});
+        };
 
-server.listen(port, () => {
-    console.log(`Server started on port ${port}`);
-});
+        ws.onclose = function() {
+            elStatus.innerText = "❌ 連線中斷";
+            elStatus.className = "status-bar status-danger";
+        };
+
+    </script>
+</body>
+</html>
