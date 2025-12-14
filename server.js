@@ -128,14 +128,12 @@ const htmlContent = `
                     elDistL.innerText = (data.L === 999) ? "> 3m" : data.L + " cm";
                     elDistR.innerText = (data.R === 999) ? "> 3m" : data.R + " cm";
                     
-                    // 電量顯示邏輯 (目前 ESP32 沒有傳 Bat，所以顯示 -- %)
                     if (data.Bat !== undefined) {
                         elBat.innerText = data.Bat + " %";
                     } else {
                         elBat.innerText = "-- %";
                     }
 
-                    // 障礙物警示
                     var minDist = Math.min(data.L, data.R);
                     if (minDist < 50) {
                         elStatus.innerText = "⚠️ 注意前方障礙物！";
@@ -182,5 +180,5 @@ wss.on('connection', (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(\`Server started on port \${PORT}\`);
+    console.log(`Server started on port ${PORT}`);
 });
